@@ -1,0 +1,53 @@
+{
+  "name": "inventory-app",
+  "version": "1.0.0",
+  "description": "Local Desktop Inventory Management System",
+  "main": "main.js",
+  "scripts": {
+    "dev:vite": "vite",
+    "dev:electron": "wait-on tcp:5173 && electron .",
+    "dev": "concurrently -k \"npm run dev:vite\" \"npm run dev:electron\"",
+    "build": "vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.inventory.app",
+    "productName": "Inventory Manager",
+    "compression": "normal",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "dist/**/*",
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+        "to": "better_sqlite3.node"
+      }
+    ]
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "lucide-react": "^0.454.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "vite": "^5.4.10",
+    "wait-on": "^8.0.1"
+  }
+}
