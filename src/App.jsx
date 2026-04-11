@@ -139,9 +139,11 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-gray-900 leading-tight">
-              Inventory
+              Xen
             </h1>
-            <p className="text-xs text-gray-500 font-medium">Manager Pro</p>
+            <p className="text-xs text-gray-500 font-medium">
+              Inventory Manager
+            </p>
           </div>
         </div>
 
