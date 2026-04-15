@@ -13,6 +13,10 @@ import {
   Edit,
   AlertTriangle,
   Settings,
+  ShoppingCart,
+  LogOut,
+  Lock,
+  User,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -40,6 +44,7 @@ export default function App() {
   const [products, setProducts] = useState([]);
   const [notification, setNotification] = useState(null);
   const [pendingBarcode, setPendingBarcode] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
 
   const bufferRef = useRef("");
   const scanTimeoutRef = useRef(null);
@@ -65,11 +70,17 @@ export default function App() {
   };
 
   const handleNotFound = (barcode) => {
+    if (currentUser?.role === "seller") {
+      showNotification(`This product isn't registered (${barcode})`, "error");
+      return;
+    }
     setPendingBarcode(barcode);
     setActiveTab("add");
   };
 
   const triggerGlobalScan = async (barcode) => {
+    if (!currentUser) return; // Prevent scanning if not logged in
+
     if (activeTab === "add") {
       handleNotFound(barcode);
       return;
@@ -79,7 +90,7 @@ export default function App() {
       const res = await window.api.sellProduct(barcode);
       if (res.success) {
         showNotification(
-          `Sold 1x ${res.product.name} (Profit: ${(res.profit || 0).toFixed(2)} DZD)`,
+          `Sold 1x ${res.product.name}${currentUser?.role === "admin" ? ` (Profit: ${(res.profit || 0).toFixed(2)} DZD)` : ""}`,
           "success",
         );
         fetchProducts();
@@ -127,10 +138,16 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
       clearTimeout(scanTimeoutRef.current);
     };
-  }, [activeTab]);
+  }, [activeTab, currentUser]);
+
+  if (!currentUser) {
+    return (
+      <LoginView onLogin={setCurrentUser} showNotification={showNotification} />
+    );
+  }
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans text-gray-800">
+    <div className="flex h-screen bg-gray-50 font-sans text-gray-800 animate-fade-in">
       {/* Sidebar */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-sm">
         <div className="p-6 flex items-center gap-3 border-b border-gray-100">
@@ -147,33 +164,68 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2">
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          <div className="px-3 pb-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
+            Menu
+          </div>
           <SidebarButton
             icon={<LayoutDashboard size={20} />}
             label="Dashboard"
             active={activeTab === "dashboard"}
             onClick={() => setActiveTab("dashboard")}
           />
-          <SidebarButton
-            icon={<PlusCircle size={20} />}
-            label="Add Stock"
-            active={activeTab === "add"}
-            onClick={() => setActiveTab("add")}
-          />
+          {currentUser?.role === "admin" && (
+            <>
+              <SidebarButton
+                icon={<PlusCircle size={20} />}
+                label="Add Stock"
+                active={activeTab === "add"}
+                onClick={() => setActiveTab("add")}
+              />
 
-          <SidebarButton
-            icon={<UploadCloud size={20} />}
-            label="Import Excel"
-            active={activeTab === "import"}
-            onClick={() => setActiveTab("import")}
-          />
-          <SidebarButton
-            icon={<Settings size={20} />}
-            label="Settings"
-            active={activeTab === "settings"}
-            onClick={() => setActiveTab("settings")}
-          />
+              <SidebarButton
+                icon={<UploadCloud size={20} />}
+                label="Import Excel"
+                active={activeTab === "import"}
+                onClick={() => setActiveTab("import")}
+              />
+              <SidebarButton
+                icon={<Settings size={20} />}
+                label="Settings"
+                active={activeTab === "settings"}
+                onClick={() => setActiveTab("settings")}
+              />
+            </>
+          )}
         </nav>
+
+        {/* User Profile & Logout */}
+        <div className="p-4 border-t border-gray-100">
+          <div className="bg-gray-50 rounded-xl p-3 flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-bold capitalize">
+                {currentUser.username[0]}
+              </div>
+              <div>
+                <p className="text-sm font-bold text-gray-800 capitalize leading-tight">
+                  {currentUser.username}
+                </p>
+                <p className="text-xs text-brand-600 font-medium capitalize">
+                  {currentUser.role} Mode
+                </p>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setCurrentUser(null);
+              setActiveTab("dashboard");
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+          >
+            <LogOut size={16} /> Sign Out
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}
@@ -205,9 +257,10 @@ export default function App() {
                 products={products}
                 fetchProducts={fetchProducts}
                 showNotification={showNotification}
+                currentUser={currentUser}
               />
             )}
-            {activeTab === "add" && (
+            {activeTab === "add" && currentUser?.role === "admin" && (
               <AddStockView
                 showNotification={showNotification}
                 initialBarcode={pendingBarcode}
@@ -215,16 +268,18 @@ export default function App() {
               />
             )}
 
-            {activeTab === "import" && (
+            {activeTab === "import" && currentUser?.role === "admin" && (
               <ImportExcelView
                 showNotification={showNotification}
                 fetchProducts={fetchProducts}
               />
             )}
-            {activeTab === "settings" && (
+            {activeTab === "settings" && currentUser?.role === "admin" && (
               <SettingsView
                 showNotification={showNotification}
                 fetchProducts={fetchProducts}
+                currentUser={currentUser}
+                setCurrentUser={setCurrentUser}
               />
             )}
           </div>
@@ -255,8 +310,14 @@ function SidebarButton({ icon, label, active, onClick }) {
 
 // --- Views ---
 
-function DashboardView({ products, fetchProducts, showNotification }) {
+function DashboardView({
+  products,
+  fetchProducts,
+  showNotification,
+  currentUser,
+}) {
   const [editingProduct, setEditingProduct] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [salesStats, setSalesStats] = useState({
     totalProfit: 0,
     totalRevenue: 0,
@@ -318,6 +379,22 @@ function DashboardView({ products, fetchProducts, showNotification }) {
     }
   };
 
+  const handleManualSell = async (barcode) => {
+    if (window.api) {
+      const res = await window.api.sellProduct(barcode);
+      if (res.success) {
+        showNotification(
+          `Sold 1x ${res.product.name}${currentUser?.role === "admin" ? ` (Profit: ${(res.profit || 0).toFixed(2)} DZD)` : ""}`,
+          "success",
+        );
+        fetchProducts();
+        fetchStats();
+      } else {
+        showNotification(res.message, "error");
+      }
+    }
+  };
+
   // Stock level helpers
   const getStockColor = (qty) => {
     if (qty <= 5) return "bg-red-100 text-red-700 ring-1 ring-red-300";
@@ -325,6 +402,12 @@ function DashboardView({ products, fetchProducts, showNotification }) {
       return "bg-orange-100 text-orange-700 ring-1 ring-orange-300";
     return "bg-green-100 text-green-700";
   };
+
+  const filteredProducts = products.filter(
+    (p) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.barcode.includes(searchQuery),
+  );
 
   const criticalProducts = products.filter((p) => p.quantity <= 5);
   const lowProducts = products.filter(
@@ -334,27 +417,33 @@ function DashboardView({ products, fetchProducts, showNotification }) {
   return (
     <div className="space-y-6">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div
+        className={`grid grid-cols-1 gap-6 ${currentUser?.role === "admin" ? "md:grid-cols-4" : "md:grid-cols-1"}`}
+      >
         <StatCard
           title="Total Stock Items"
           value={totalItems.toLocaleString()}
           icon={<Archive className="text-blue-500" />}
         />
-        <StatCard
-          title="Total Valuation"
-          value={`${totalValuation.toFixed(2)} DZD`}
-          icon={<Coins className="text-green-500" />}
-        />
-        <StatCard
-          title="Potential Profit"
-          value={`${potentialProfit.toFixed(2)} DZD`}
-          icon={<TrendingUp className="text-purple-500" />}
-        />
-        <StatCard
-          title="Realized Profit"
-          value={`${salesStats.totalProfit.toFixed(2)} DZD`}
-          icon={<TrendingUp className="text-emerald-600" />}
-        />
+        {currentUser?.role === "admin" && (
+          <>
+            <StatCard
+              title="Total Valuation"
+              value={`${totalValuation.toFixed(2)} DZD`}
+              icon={<Coins className="text-green-500" />}
+            />
+            <StatCard
+              title="Potential Profit"
+              value={`${potentialProfit.toFixed(2)} DZD`}
+              icon={<TrendingUp className="text-purple-500" />}
+            />
+            <StatCard
+              title="Realized Profit"
+              value={`${salesStats.totalProfit.toFixed(2)} DZD`}
+              icon={<TrendingUp className="text-emerald-600" />}
+            />
+          </>
+        )}
       </div>
 
       {/* Stock Alerts */}
@@ -404,48 +493,67 @@ function DashboardView({ products, fetchProducts, showNotification }) {
 
       {/* Table */}
       <div className="glass-panel overflow-hidden">
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-white">
-          <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <Search size={18} className="text-gray-400" /> Inventory List
-          </h3>
-          <div className="flex gap-2">
-            <button
-              onClick={async () => {
-                if (window.api && window.api.exportStockExcel) {
-                  const res = await window.api.exportStockExcel();
-                  showNotification(
-                    res.message,
-                    res.success ? "success" : "error",
-                  );
-                }
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium rounded-lg transition-colors text-sm border border-blue-200"
-            >
-              <Archive size={16} /> Export Stock (Excel)
-            </button>
-            <button
-              onClick={handleExportSales}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium rounded-lg transition-colors text-sm border border-emerald-200"
-            >
-              <UploadCloud size={16} /> Export Sales (Excel)
-            </button>
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-white gap-4 flex-wrap">
+          <div className="flex items-center gap-4 flex-1 min-w-[300px]">
+            <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2 whitespace-nowrap hidden sm:flex">
+              <Archive size={18} className="text-gray-400" /> Inventory List
+            </h3>
+            <div className="relative flex-1 max-w-sm">
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+              />
+              <input
+                type="text"
+                placeholder="Search by name or barcode..."
+                className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-shadow"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
           </div>
+          {currentUser?.role === "admin" && (
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  if (window.api && window.api.exportStockExcel) {
+                    const res = await window.api.exportStockExcel();
+                    showNotification(
+                      res.message,
+                      res.success ? "success" : "error",
+                    );
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium rounded-lg transition-colors text-sm border border-blue-200"
+              >
+                <Archive size={16} /> Export Stock (Excel)
+              </button>
+              <button
+                onClick={handleExportSales}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium rounded-lg transition-colors text-sm border border-emerald-200"
+              >
+                <UploadCloud size={16} /> Export Sales (Excel)
+              </button>
+            </div>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-gray-50/50 text-gray-500 text-sm uppercase tracking-wider">
+              <tr className="bg-gray-50/50 text-black text-sm uppercase tracking-wider">
                 <th className="px-4 py-4 font-semibold w-16">Image</th>
                 <th className="px-6 py-4 font-semibold">Barcode</th>
                 <th className="px-6 py-4 font-semibold">Name</th>
-                <th className="px-6 py-4 font-semibold">Buy Price</th>
+                {currentUser?.role === "admin" && (
+                  <th className="px-6 py-4 font-semibold">Buy Price</th>
+                )}
                 <th className="px-6 py-4 font-semibold">Sell Price</th>
                 <th className="px-6 py-4 font-semibold text-right">Quantity</th>
                 <th className="px-6 py-4 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
-              {products.map((p) => (
+              {filteredProducts.map((p) => (
                 <tr
                   key={p.id}
                   className="hover:bg-gray-50/50 transition-colors"
@@ -463,16 +571,18 @@ function DashboardView({ products, fetchProducts, showNotification }) {
                       </div>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-sm font-mono text-gray-600">
+                  <td className="px-6 py-4 text-sm font-mono text-black">
                     {p.barcode}
                   </td>
                   <td className="px-6 py-4 font-medium text-gray-900">
                     {p.name}
                   </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {Number(p.buy_price || 0).toFixed(2)} DZD
-                  </td>
-                  <td className="px-6 py-4 text-gray-600">
+                  {currentUser?.role === "admin" && (
+                    <td className="px-6 py-4 text-black">
+                      {Number(p.buy_price || 0).toFixed(2)} DZD
+                    </td>
+                  )}
+                  <td className="px-6 py-4 text-black">
                     {Number(p.sell_price || 0).toFixed(2)} DZD
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -484,30 +594,42 @@ function DashboardView({ products, fetchProducts, showNotification }) {
                   </td>
                   <td className="px-6 py-4 text-right whitespace-nowrap">
                     <button
-                      onClick={() => setEditingProduct(p)}
-                      className="text-gray-400 hover:text-blue-500 transition-colors p-2 rounded-md hover:bg-blue-50 mr-1"
-                      title="Edit"
+                      onClick={() => handleManualSell(p.barcode)}
+                      className="text-black hover:text-emerald-600 transition-colors p-2 rounded-md hover:bg-emerald-50 mr-1"
+                      title="Sell 1 Item Manually"
                     >
-                      <Edit size={16} />
+                      <ShoppingCart size={16} />
                     </button>
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-md hover:bg-red-50"
-                      title="Delete"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    {currentUser?.role === "admin" && (
+                      <>
+                        <button
+                          onClick={() => setEditingProduct(p)}
+                          className="text-gray-400 hover:text-blue-500 transition-colors p-2 rounded-md hover:bg-blue-50 mr-1"
+                          title="Edit"
+                        >
+                          <Edit size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(p.id)}
+                          className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-md hover:bg-red-50"
+                          title="Delete"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
-              {products.length === 0 && (
+              {filteredProducts.length === 0 && (
                 <tr>
                   <td
-                    colSpan="7"
+                    colSpan={currentUser?.role === "admin" ? "7" : "6"}
                     className="px-6 py-12 text-center text-gray-400"
                   >
-                    No products found. Start by adding stock or importing Excel
-                    data.
+                    {products.length === 0
+                      ? "No products found. Start by adding stock or importing Excel data."
+                      : "No products match your search query."}
                   </td>
                 </tr>
               )}
@@ -527,12 +649,14 @@ function DashboardView({ products, fetchProducts, showNotification }) {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-gray-50/50 text-gray-500 text-sm uppercase tracking-wider">
+              <tr className="bg-gray-50/50 text-black text-sm uppercase tracking-wider">
                 <th className="px-6 py-4 font-semibold">Time</th>
                 <th className="px-6 py-4 font-semibold">Barcode</th>
                 <th className="px-6 py-4 font-semibold">Name</th>
                 <th className="px-6 py-4 font-semibold">Sale Price</th>
-                <th className="px-6 py-4 font-semibold">Profit</th>
+                {currentUser?.role === "admin" && (
+                  <th className="px-6 py-4 font-semibold">Profit</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
@@ -541,27 +665,27 @@ function DashboardView({ products, fetchProducts, showNotification }) {
                   key={s.id}
                   className="hover:bg-gray-50/50 transition-colors"
                 >
-                  <td className="px-6 py-3 text-sm text-gray-500">
+                  <td className="px-6 py-3 text-sm text-black">
                     {new Date(s.sale_date).toLocaleString()}
                   </td>
-                  <td className="px-6 py-3 text-sm font-mono text-gray-600">
+                  <td className="px-6 py-3 text-sm font-mono text-black">
                     {s.barcode}
                   </td>
-                  <td className="px-6 py-3 font-medium text-gray-900">
-                    {s.name}
-                  </td>
+                  <td className="px-6 py-3 font-medium text-black">{s.name}</td>
                   <td className="px-6 py-3 text-green-600 font-medium">
                     {Number(s.sell_price || 0).toFixed(2)} DZD
                   </td>
-                  <td className="px-6 py-3 text-emerald-600 font-bold">
-                    +{Number(s.profit || 0).toFixed(2)} DZD
-                  </td>
+                  {currentUser?.role === "admin" && (
+                    <td className="px-6 py-3 text-emerald-600 font-bold">
+                      +{Number(s.profit || 0).toFixed(2)} DZD
+                    </td>
+                  )}
                 </tr>
               ))}
               {recentSales.length === 0 && (
                 <tr>
                   <td
-                    colSpan="5"
+                    colSpan={currentUser?.role === "admin" ? "5" : "4"}
                     className="px-6 py-8 text-center text-gray-400"
                   >
                     No recent sales found.
@@ -696,7 +820,7 @@ function AddStockView({ showNotification, initialBarcode, clearPending }) {
             )}
           </label>
           <div className="flex-1">
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
+            <label className="block text-sm font-bold text-black mb-1">
               Product Photo (optional)
             </label>
             <input
@@ -712,7 +836,7 @@ function AddStockView({ showNotification, initialBarcode, clearPending }) {
           </div>
         </div>
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1">
+          <label className="block text-sm font-bold text-black mb-1">
             Barcode (Scan Here) *
           </label>
           <input
@@ -732,7 +856,7 @@ function AddStockView({ showNotification, initialBarcode, clearPending }) {
           />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1">
+          <label className="block text-sm font-bold text-black mb-1">
             Product Name
           </label>
           <input
@@ -746,7 +870,7 @@ function AddStockView({ showNotification, initialBarcode, clearPending }) {
         </div>
         <div className="grid grid-cols-2 gap-5">
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
+            <label className="block text-sm font-bold text-black mb-1">
               Buy Price (DZD)
             </label>
             <input
@@ -760,7 +884,7 @@ function AddStockView({ showNotification, initialBarcode, clearPending }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
+            <label className="block text-sm font-bold text-black mb-1">
               Sell Price (DZD)
             </label>
             <input
@@ -775,7 +899,7 @@ function AddStockView({ showNotification, initialBarcode, clearPending }) {
           </div>
         </div>
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1">
+          <label className="block text-sm font-bold text-black mb-1">
             Quantity to Add
           </label>
           <input
@@ -1042,7 +1166,7 @@ function EditProductModal({
               </div>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
+              <label className="block text-sm font-bold text-black mb-1">
                 Barcode *
               </label>
               <input
@@ -1059,7 +1183,7 @@ function EditProductModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
+              <label className="block text-sm font-bold text-black mb-1">
                 Product Name
               </label>
               <input
@@ -1073,7 +1197,7 @@ function EditProductModal({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label className="block text-sm font-bold text-black mb-1">
                   Buy Price (DZD)
                 </label>
                 <input
@@ -1087,7 +1211,7 @@ function EditProductModal({
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label className="block text-sm font-bold text-black mb-1">
                   Sell Price (DZD)
                 </label>
                 <input
@@ -1102,7 +1226,7 @@ function EditProductModal({
               </div>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
+              <label className="block text-sm font-bold text-black mb-1">
                 Quantity in Stock
               </label>
               <input
@@ -1138,9 +1262,78 @@ function EditProductModal({
   );
 }
 
-function SettingsView({ showNotification, fetchProducts }) {
+function SettingsView({ showNotification, fetchProducts, currentUser, setCurrentUser }) {
   const [confirmText, setConfirmText] = useState("");
   const [isResetting, setIsResetting] = useState(false);
+  const [sellers, setSellers] = useState([]);
+  const [newSeller, setNewSeller] = useState({ username: "", password: "" });
+  const [adminCreds, setAdminCreds] = useState({ username: currentUser.username, password: "" });
+
+  const handleUpdateAdmin = async (e) => {
+    e.preventDefault();
+    if (!adminCreds.username) {
+      return showNotification("Username cannot be empty", "error");
+    }
+    if (window.api && window.api.updateUser) {
+      const res = await window.api.updateUser(currentUser.id, adminCreds.username, adminCreds.password);
+      if (res.success) {
+        showNotification(res.message, "success");
+        setCurrentUser({ ...currentUser, username: adminCreds.username });
+        setAdminCreds({ ...adminCreds, password: "" });
+      } else {
+        showNotification(res.message, "error");
+      }
+    }
+  };
+
+  const fetchSellers = async () => {
+    if (window.api && window.api.getSellers) {
+      try {
+        const data = await window.api.getSellers();
+        setSellers(data);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchSellers();
+  }, []);
+
+  const handleAddSeller = async (e) => {
+    e.preventDefault();
+    if (!newSeller.username || !newSeller.password) {
+      return showNotification("Provide both username and password", "error");
+    }
+    if (window.api && window.api.addSeller) {
+      const res = await window.api.addSeller(
+        newSeller.username,
+        newSeller.password,
+      );
+      if (res.success) {
+        showNotification(res.message, "success");
+        setNewSeller({ username: "", password: "" });
+        fetchSellers();
+      } else {
+        showNotification(res.message, "error");
+      }
+    }
+  };
+
+  const handleDeleteSeller = async (id) => {
+    if (window.confirm("Are you sure you want to delete this seller?")) {
+      if (window.api && window.api.deleteSeller) {
+        const res = await window.api.deleteSeller(id);
+        if (res.success) {
+          showNotification(res.message, "success");
+          fetchSellers();
+        } else {
+          showNotification(res.message, "error");
+        }
+      }
+    }
+  };
 
   const handleReset = async () => {
     if (confirmText !== "RESET") {
@@ -1173,12 +1366,142 @@ function SettingsView({ showNotification, fetchProducts }) {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-fade-in-up">
+      {/* Staff Management */}
+      <div className="glass-panel p-8 bg-white">
+        <div className="mb-6 border-b border-gray-100 pb-4">
+          <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <User size={24} className="text-brand-500" /> Account & Staff Management
+          </h2>
+          <p className="text-gray-500 mt-2 text-sm">
+            Update your own credentials or create user accounts for sellers. Sellers have restricted access to
+            prevent modifications and cannot view margins/profit.
+          </p>
+        </div>
+
+        {/* Admin Account Update */}
+        <div className="mb-8 p-5 bg-brand-50 rounded-xl border border-brand-100">
+          <h3 className="font-bold text-brand-800 mb-3 text-sm uppercase tracking-wider">Your Credentials</h3>
+          <form
+            onSubmit={handleUpdateAdmin}
+            className="flex flex-col sm:flex-row gap-4"
+          >
+            <div className="flex-1">
+              <input
+                type="text"
+                className="w-full px-4 py-2.5 rounded-lg border border-brand-200 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white"
+                placeholder="My New Username"
+                value={adminCreds.username}
+                onChange={(e) =>
+                  setAdminCreds({ ...adminCreds, username: e.target.value })
+                }
+              />
+            </div>
+            <div className="flex-1">
+              <input
+                type="password"
+                className="w-full px-4 py-2.5 rounded-lg border border-brand-200 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white"
+                placeholder="New Password (leave blank to keep)"
+                value={adminCreds.password}
+                onChange={(e) =>
+                  setAdminCreds({ ...adminCreds, password: e.target.value })
+                }
+              />
+            </div>
+            <button
+              type="submit"
+              className="bg-brand-600 hover:bg-brand-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm transition-colors whitespace-nowrap"
+            >
+              Update Details
+            </button>
+          </form>
+        </div>
+
+        <h3 className="font-bold text-gray-700 mb-3 text-sm uppercase tracking-wider">Seller Accounts</h3>
+
+        <form
+          onSubmit={handleAddSeller}
+          className="flex flex-col sm:flex-row gap-4 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200"
+        >
+          <div className="flex-1">
+            <input
+              type="text"
+              className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+              placeholder="Seller Username"
+              value={newSeller.username}
+              onChange={(e) =>
+                setNewSeller({ ...newSeller, username: e.target.value })
+              }
+            />
+          </div>
+          <div className="flex-1">
+            <input
+              type="password"
+              className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+              placeholder="Seller Password"
+              value={newSeller.password}
+              onChange={(e) =>
+                setNewSeller({ ...newSeller, password: e.target.value })
+              }
+            />
+          </div>
+          <button
+            type="submit"
+            className="bg-brand-600 hover:bg-brand-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm transition-colors whitespace-nowrap"
+          >
+            Add Seller
+          </button>
+        </form>
+
+        <div className="border rounded-xl overflow-hidden shadow-sm">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 text-gray-600 text-sm">
+                <th className="px-6 py-3 font-semibold">ID</th>
+                <th className="px-6 py-3 font-semibold">Username</th>
+                <th className="px-6 py-3 font-semibold">Role</th>
+                <th className="px-6 py-3 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {sellers.map((s) => (
+                <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-6 py-3 text-sm text-gray-500">{s.id}</td>
+                  <td className="px-6 py-3 font-bold text-gray-800">
+                    {s.username}
+                  </td>
+                  <td className="px-6 py-3 text-sm text-gray-500 capitalize">
+                    {s.role}
+                  </td>
+                  <td className="px-6 py-3 text-right">
+                    <button
+                      onClick={() => handleDeleteSeller(s.id)}
+                      className="text-red-500 hover:bg-red-50 p-2 rounded-md transition-colors"
+                      title="Delete Seller"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {sellers.length === 0 && (
+                <tr>
+                  <td colSpan="4" className="px-6 py-4 text-center text-gray-400 text-sm">
+                    No active sellers found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Database Reset */}
       <div className="glass-panel p-8 bg-white">
         <div className="mb-6 border-b border-red-100 pb-4">
-          <h2 className="text-2xl font-bold text-red-600 flex items-center gap-2">
+          <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
             <AlertTriangle size={24} /> Reset
           </h2>
-          <p className="text-gray-500 mt-2">
+          <p className="text-gray-500 mt-2 text-sm">
             This will permanently delete your entire inventory and all sales
             records. This action cannot be undone. You should backup your stock
             to Excel first if you want to keep a record.
@@ -1199,12 +1522,114 @@ function SettingsView({ showNotification, fetchProducts }) {
           <button
             onClick={handleReset}
             disabled={isResetting || confirmText !== "RESET"}
-            className="w-full bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all duration-200 flex items-center justify-center gap-2"
+            className="w-full bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl shadow-sm transition-all duration-200 flex items-center justify-center gap-2"
           >
             <Trash2 size={20} />{" "}
             {isResetting ? "WIPING DATA..." : "PERMANENTLY WIPE DATABASE"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function LoginView({ onLogin, showNotification }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!username || !password)
+      return showNotification("Please enter details", "error");
+
+    setLoading(true);
+    if (window.api && window.api.login) {
+      const res = await window.api.login(username, password);
+      if (res.success) {
+        onLogin({ id: res.id, username: res.username, role: res.role });
+        showNotification(`Welcome back, ${res.username}!`, "success");
+      } else {
+        showNotification(res.message, "error");
+      }
+    } else {
+      showNotification("Systems offline.", "error");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 font-sans p-4 relative overflow-hidden">
+      <div className="w-full max-w-md bg-white border border-gray-100 shadow-xl rounded-3xl p-10 relative z-10 animate-fade-in-up">
+        <div className="flex flex-col items-center mb-8">
+          <div className="bg-brand-500 p-4 rounded-2xl shadow-lg shadow-brand-500/30 mb-5 border border-brand-400/50">
+            <Package className="text-white w-10 h-10" />
+          </div>
+          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">
+            Welcome to Xen
+          </h1>
+          <p className="text-sm font-medium text-gray-500 mt-2">
+            Sign in to manage your Point of Sale
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-sm font-black text-black ml-1">
+              Username
+            </label>
+            <div className="relative group">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <User className="h-5 w-5 text-gray-400 group-focus-within:text-brand-500 transition-colors" />
+              </div>
+              <input
+                type="text"
+                className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:bg-white transition-all shadow-sm font-medium"
+                placeholder="Enter your username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoFocus
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-black text-black ml-1">
+              Password
+            </label>
+            <div className="relative group">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Lock className="h-5 w-5 text-gray-400 group-focus-within:text-brand-500 transition-colors" />
+              </div>
+              <input
+                type="password"
+                className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:bg-white transition-all shadow-sm font-medium"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-brand-400 text-white font-bold py-4 px-4 rounded-xl shadow-lg shadow-brand-500/30 transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-3 group mt-4 overflow-hidden relative"
+          >
+            {loading ? (
+              <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <>
+                <span className="text-base tracking-wide">
+                  Sign In to Dashboard
+                </span>
+                <LayoutDashboard className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </>
+            )}
+          </button>
+        </form>
       </div>
     </div>
   );
