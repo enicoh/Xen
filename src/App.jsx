@@ -45,6 +45,7 @@ export default function App() {
   const [notification, setNotification] = useState(null);
   const [pendingBarcode, setPendingBarcode] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
+  const [sellingProduct, setSellingProduct] = useState(null);
 
   const bufferRef = useRef("");
   const scanTimeoutRef = useRef(null);
@@ -86,22 +87,33 @@ export default function App() {
       return;
     }
 
+    const product = products.find(p => p.barcode === barcode);
+    if (product) {
+      setSellingProduct(product);
+    } else {
+      handleNotFound(barcode);
+    }
+  };
+
+  const handleConfirmSell = async (qty) => {
+    if (!sellingProduct) return;
     if (window.api) {
-      const res = await window.api.sellProduct(barcode);
+      const res = await window.api.sellProduct(sellingProduct.barcode, qty);
       if (res.success) {
         showNotification(
-          `Sold 1x ${res.product.name}${currentUser?.role === "admin" ? ` (Profit: ${(res.profit || 0).toFixed(2)} DZD)` : ""}`,
+          `Sold ${qty}x ${sellingProduct.name}${currentUser?.role === "admin" ? ` (Profit: ${(res.profit || 0).toFixed(2)} DZD)` : ""}`,
           "success",
         );
         fetchProducts();
       } else {
         if (res.message === "Product not found") {
-          handleNotFound(barcode);
+          handleNotFound(sellingProduct.barcode);
         } else {
           showNotification(res.message, "error");
         }
       }
     }
+    setSellingProduct(null);
   };
 
   useEffect(() => {
@@ -258,6 +270,7 @@ export default function App() {
                 fetchProducts={fetchProducts}
                 showNotification={showNotification}
                 currentUser={currentUser}
+                setSellingProduct={setSellingProduct}
               />
             )}
             {activeTab === "add" && currentUser?.role === "admin" && (
@@ -285,6 +298,14 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {sellingProduct && (
+        <SellProductModal
+          product={sellingProduct}
+          onClose={() => setSellingProduct(null)}
+          onConfirm={handleConfirmSell}
+        />
+      )}
     </div>
   );
 }
@@ -315,6 +336,7 @@ function DashboardView({
   fetchProducts,
   showNotification,
   currentUser,
+  setSellingProduct,
 }) {
   const [editingProduct, setEditingProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -379,18 +401,17 @@ function DashboardView({
     }
   };
 
-  const handleManualSell = async (barcode) => {
-    if (window.api) {
-      const res = await window.api.sellProduct(barcode);
-      if (res.success) {
-        showNotification(
-          `Sold 1x ${res.product.name}${currentUser?.role === "admin" ? ` (Profit: ${(res.profit || 0).toFixed(2)} DZD)` : ""}`,
-          "success",
-        );
-        fetchProducts();
-        fetchStats();
-      } else {
-        showNotification(res.message, "error");
+  const handleDeleteSale = async (id) => {
+    if (window.confirm("Are you sure you want to delete this sale? This will restore the item to stock.")) {
+      if (window.api && window.api.deleteSale) {
+        const res = await window.api.deleteSale(id);
+        if (res.success) {
+          showNotification(res.message, "success");
+          fetchProducts();
+          fetchStats();
+        } else {
+          showNotification(res.message, "error");
+        }
       }
     }
   };
@@ -594,9 +615,9 @@ function DashboardView({
                   </td>
                   <td className="px-6 py-4 text-right whitespace-nowrap">
                     <button
-                      onClick={() => handleManualSell(p.barcode)}
+                      onClick={() => setSellingProduct(p)}
                       className="text-black hover:text-emerald-600 transition-colors p-2 rounded-md hover:bg-emerald-50 mr-1"
-                      title="Sell 1 Item Manually"
+                      title="Sell Item"
                     >
                       <ShoppingCart size={16} />
                     </button>
@@ -653,9 +674,13 @@ function DashboardView({
                 <th className="px-6 py-4 font-semibold">Time</th>
                 <th className="px-6 py-4 font-semibold">Barcode</th>
                 <th className="px-6 py-4 font-semibold">Name</th>
+                <th className="px-6 py-4 font-semibold">Qty</th>
                 <th className="px-6 py-4 font-semibold">Sale Price</th>
                 {currentUser?.role === "admin" && (
-                  <th className="px-6 py-4 font-semibold">Profit</th>
+                  <>
+                    <th className="px-6 py-4 font-semibold">Profit</th>
+                    <th className="px-6 py-4 font-semibold text-right">Actions</th>
+                  </>
                 )}
               </tr>
             </thead>
@@ -672,20 +697,34 @@ function DashboardView({
                     {s.barcode}
                   </td>
                   <td className="px-6 py-3 font-medium text-black">{s.name}</td>
+                  <td className="px-6 py-3 text-black font-bold">
+                    x{s.quantity || 1}
+                  </td>
                   <td className="px-6 py-3 text-green-600 font-medium">
                     {Number(s.sell_price || 0).toFixed(2)} DZD
                   </td>
                   {currentUser?.role === "admin" && (
-                    <td className="px-6 py-3 text-emerald-600 font-bold">
-                      +{Number(s.profit || 0).toFixed(2)} DZD
-                    </td>
+                    <>
+                      <td className="px-6 py-3 text-emerald-600 font-bold">
+                        +{Number(s.profit || 0).toFixed(2)} DZD
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <button
+                          onClick={() => handleDeleteSale(s.id)}
+                          className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-md hover:bg-red-50"
+                          title="Delete Sale"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </>
                   )}
                 </tr>
               ))}
               {recentSales.length === 0 && (
                 <tr>
                   <td
-                    colSpan={currentUser?.role === "admin" ? "5" : "4"}
+                    colSpan={currentUser?.role === "admin" ? "7" : "5"}
                     className="px-6 py-8 text-center text-gray-400"
                   >
                     No recent sales found.
@@ -1629,6 +1668,79 @@ function LoginView({ onLogin, showNotification }) {
               </>
             )}
           </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function SellProductModal({ product, onClose, onConfirm }) {
+  const [qty, setQty] = useState(1);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    // Focus the input to let them type quantity instantly
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, []);
+
+  const handleConfirm = (e) => {
+    e.preventDefault();
+    if (qty > 0 && qty <= product.quantity) {
+      onConfirm(qty);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
+        <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-brand-50">
+          <h2 className="text-lg font-bold text-brand-800">Complete Sale</h2>
+          <button onClick={onClose} className="text-brand-400 hover:text-brand-600 transition-colors">✕</button>
+        </div>
+        <form onSubmit={handleConfirm} className="p-6 flex flex-col items-center shadow-inner bg-slate-50/50">
+          <div className="mb-4 text-center">
+            <h3 className="text-xl font-extrabold text-gray-900 leading-tight">{product.name}</h3>
+            <p className="text-sm text-gray-500 mt-1 font-medium">Available in stock: <span className="font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{product.quantity}</span></p>
+          </div>
+          
+          <label className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">Quantity to Sell</label>
+          <div className="flex items-center gap-6 mb-8 bg-white px-6 py-4 rounded-2xl shadow-sm border border-gray-100">
+            <button
+              type="button"
+              onClick={() => setQty(q => Math.max(1, q - 1))}
+              className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition-all active:scale-95"
+            >
+              <MinusCircle size={32} strokeWidth={2} />
+            </button>
+            
+            <input
+              ref={inputRef}
+              type="number"
+              min="1"
+              max={product.quantity}
+              value={qty}
+              onChange={(e) => setQty(parseInt(e.target.value) || 1)}
+              className="w-20 text-center text-4xl font-black border-b-2 border-transparent focus:border-brand-500 outline-none bg-transparent text-gray-800 selection:bg-brand-200"
+            />
+            
+            <button
+              type="button"
+              onClick={() => setQty(q => Math.min(product.quantity, q + 1))}
+              className="text-gray-400 hover:text-emerald-500 hover:bg-emerald-50 p-2 rounded-full transition-all active:scale-95"
+            >
+              <PlusCircle size={32} strokeWidth={2} />
+            </button>
+          </div>
+
+          <div className="w-full flex gap-3">
+            <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 font-bold rounded-xl transition-all shadow-sm">Cancel</button>
+            <button type="submit" disabled={qty <= 0 || qty > product.quantity} className="flex-1 py-3.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-md shadow-brand-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
+              Confirm Sale
+            </button>
+          </div>
         </form>
       </div>
     </div>

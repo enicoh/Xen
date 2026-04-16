@@ -50,6 +50,10 @@ try {
   db.exec("ALTER TABLE products ADD COLUMN image TEXT;");
 } catch (e) {}
 
+try {
+  db.exec("ALTER TABLE sales ADD COLUMN quantity INTEGER DEFAULT 1;");
+} catch (e) {}
+
 // Insert default users if none exist
 const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get().count;
 if (userCount === 0) {
@@ -73,7 +77,7 @@ function createWindow() {
 
   if (isDev) {
     win.loadURL("http://localhost:5173");
-    win.webContents.openDevTools();
+    // win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, "dist", "index.html"));
   }
@@ -105,7 +109,12 @@ ipcMain.handle("login", (event, username, password) => {
   if (user) {
     const hashed = hashPassword(password);
     if (user.password === hashed || user.password === password) {
-       return { success: true, role: user.role, username: user.username, id: user.id };
+      return {
+        success: true,
+        role: user.role,
+        username: user.username,
+        id: user.id,
+      };
     }
   }
   return { success: false, message: "Invalid username or password" };
@@ -162,7 +171,7 @@ ipcMain.handle("add-product", (event, product) => {
 });
 
 // Sell product (minus stock)
-ipcMain.handle("sell-product", (event, barcode) => {
+ipcMain.handle("sell-product", (event, barcode, qty = 1) => {
   const existingProduct = db
     .prepare("SELECT * FROM products WHERE barcode = ?")
     .get(barcode);
@@ -171,36 +180,41 @@ ipcMain.handle("sell-product", (event, barcode) => {
     return { success: false, message: "Product not found" };
   }
 
-  if (existingProduct.quantity <= 0) {
-    return { success: false, message: "Out of stock" };
+  if (existingProduct.quantity < qty) {
+    return { success: false, message: "Out of stock / Not enough quantity" };
   }
 
   const stmt = db.prepare(
-    "UPDATE products SET quantity = quantity - 1 WHERE id = ?",
+    "UPDATE products SET quantity = quantity - ? WHERE id = ?",
   );
-  stmt.run(existingProduct.id);
+  stmt.run(qty, existingProduct.id);
 
-  const profit = existingProduct.sell_price - existingProduct.buy_price;
+  const profitPerItem = existingProduct.sell_price - existingProduct.buy_price;
+  const totalProfit = profitPerItem * qty;
+  const totalSellPrice = existingProduct.sell_price * qty;
+  const totalBuyPrice = existingProduct.buy_price * qty;
 
   // Record the sale
   const insertSale = db.prepare(`
-    INSERT INTO sales (product_id, barcode, name, buy_price, sell_price, profit)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO sales (product_id, barcode, name, buy_price, sell_price, profit, quantity)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   insertSale.run(
     existingProduct.id,
     existingProduct.barcode,
     existingProduct.name,
-    existingProduct.buy_price,
-    existingProduct.sell_price,
-    profit,
+    totalBuyPrice,
+    totalSellPrice,
+    totalProfit,
+    qty,
   );
 
   return {
     success: true,
     message: "Sale successful",
     product: existingProduct,
-    profit: profit,
+    profit: totalProfit,
+    quantity: qty,
   };
 });
 
@@ -268,7 +282,7 @@ ipcMain.handle("delete-product", (event, id) => {
 ipcMain.handle("get-sales-stats", () => {
   const result = db
     .prepare(
-      "SELECT SUM(profit) as totalProfit, SUM(sell_price) as totalRevenue, COUNT(id) as totalSalesCount FROM sales",
+      "SELECT SUM(profit) as totalProfit, SUM(sell_price) as totalRevenue, SUM(quantity) as totalSalesCount FROM sales",
     )
     .get();
   return {
@@ -285,7 +299,7 @@ ipcMain.handle("export-sales-excel", async () => {
   try {
     const XLSX = require("xlsx");
     const stmt = db.prepare(
-      "SELECT barcode, name, buy_price, sell_price, profit, sale_date FROM sales ORDER BY sale_date DESC",
+      "SELECT barcode, name, COALESCE(quantity, 1) as quantity, buy_price, sell_price, profit, sale_date FROM sales ORDER BY sale_date DESC",
     );
     const sales = stmt.all();
 
@@ -308,12 +322,13 @@ ipcMain.handle("export-sales-excel", async () => {
     const worksheet = XLSX.utils.json_to_sheet([...sales, ...summary]);
     // Widen columns a bit for readability
     worksheet["!cols"] = [
+      { wch: 15 },
+      { wch: 25 },
+      { wch: 10 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 15 },
       { wch: 20 },
-      { wch: 25 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 25 },
     ];
 
     const workbook = XLSX.utils.book_new();
@@ -341,6 +356,23 @@ ipcMain.handle("get-recent-sales", () => {
     "SELECT * FROM sales ORDER BY sale_date DESC LIMIT 50",
   );
   return { success: true, data: stmt.all() };
+});
+
+ipcMain.handle("delete-sale", (event, saleId) => {
+  try {
+    const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(saleId);
+    if (!sale) return { success: false, message: "Sale not found" };
+
+    db.prepare("UPDATE products SET quantity = quantity + ? WHERE id = ?").run(
+      sale.quantity || 1,
+      sale.product_id,
+    );
+    db.prepare("DELETE FROM sales WHERE id = ?").run(saleId);
+
+    return { success: true, message: "Sale deleted and stock restored" };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
 });
 
 ipcMain.handle("reset-database", () => {
@@ -400,7 +432,9 @@ ipcMain.handle("export-stock-excel", async () => {
 // Manage Sellers
 ipcMain.handle("add-seller", (event, username, password) => {
   try {
-    const stmt = db.prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)");
+    const stmt = db.prepare(
+      "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+    );
     stmt.run(username, hashPassword(password), "seller");
     return { success: true, message: "Seller created successfully" };
   } catch (error) {
@@ -412,7 +446,9 @@ ipcMain.handle("add-seller", (event, username, password) => {
 });
 
 ipcMain.handle("get-sellers", () => {
-  return db.prepare("SELECT id, username, role FROM users WHERE role = 'seller'").all();
+  return db
+    .prepare("SELECT id, username, role FROM users WHERE role = 'seller'")
+    .all();
 });
 
 ipcMain.handle("delete-seller", (event, id) => {
@@ -423,9 +459,14 @@ ipcMain.handle("delete-seller", (event, id) => {
 ipcMain.handle("update-user", (event, id, newUsername, newPassword) => {
   try {
     if (newPassword) {
-      db.prepare("UPDATE users SET username = ?, password = ? WHERE id = ?").run(newUsername, hashPassword(newPassword), id);
+      db.prepare(
+        "UPDATE users SET username = ?, password = ? WHERE id = ?",
+      ).run(newUsername, hashPassword(newPassword), id);
     } else {
-      db.prepare("UPDATE users SET username = ? WHERE id = ?").run(newUsername, id);
+      db.prepare("UPDATE users SET username = ? WHERE id = ?").run(
+        newUsername,
+        id,
+      );
     }
     return { success: true, message: "Credentials updated successfully" };
   } catch (error) {
