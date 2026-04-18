@@ -14,3 +14,4 @@ yarn-error.log*
 .temp
 coverage/
 .vscode/
+database.db
