@@ -89,6 +89,10 @@ export default function App() {
 
     const product = products.find(p => p.barcode === barcode);
     if (product) {
+      if (product.quantity <= 0) {
+        showNotification(`Product "${product.name}" is out of stock!`, "error");
+        return;
+      }
       setSellingProduct(product);
     } else {
       handleNotFound(barcode);
@@ -118,7 +122,9 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      const isInput = ["INPUT", "TEXTAREA"].includes(e.target?.tagName);
+      if (!e || !e.target) return;
+      const tagName = e.target.tagName?.toUpperCase();
+      const isInput = ["INPUT", "TEXTAREA", "SELECT", "OPTION"].includes(tagName) || e.target.isContentEditable;
       if (isInput) return; // Let native inputs handle normal typing
 
       if (e.key === "Enter") {
@@ -150,7 +156,7 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
       clearTimeout(scanTimeoutRef.current);
     };
-  }, [activeTab, currentUser]);
+  }, [activeTab, currentUser, products]);
 
   if (!currentUser) {
     return (
@@ -346,6 +352,7 @@ function DashboardView({
     totalSalesCount: 0,
   });
   const [recentSales, setRecentSales] = useState([]);
+  const [removingSale, setRemovingSale] = useState(null);
 
   const fetchStats = async () => {
     if (window.api) {
@@ -401,19 +408,18 @@ function DashboardView({
     }
   };
 
-  const handleDeleteSale = async (id) => {
-    if (window.confirm("Are you sure you want to delete this sale? This will restore the item to stock.")) {
-      if (window.api && window.api.deleteSale) {
-        const res = await window.api.deleteSale(id);
-        if (res.success) {
-          showNotification(res.message, "success");
-          fetchProducts();
-          fetchStats();
-        } else {
-          showNotification(res.message, "error");
-        }
+  const handleDeleteSale = async (id, qtyToRemove) => {
+    if (window.api && window.api.deleteSale) {
+      const res = await window.api.deleteSale(id, qtyToRemove);
+      if (res.success) {
+        showNotification(res.message, "success");
+        fetchProducts();
+        fetchStats();
+      } else {
+        showNotification(res.message, "error");
       }
     }
+    setRemovingSale(null);
   };
 
   // Stock level helpers
@@ -616,8 +622,9 @@ function DashboardView({
                   <td className="px-6 py-4 text-right whitespace-nowrap">
                     <button
                       onClick={() => setSellingProduct(p)}
-                      className="text-black hover:text-emerald-600 transition-colors p-2 rounded-md hover:bg-emerald-50 mr-1"
-                      title="Sell Item"
+                      disabled={p.quantity <= 0}
+                      className={`p-2 rounded-md transition-colors mr-1 ${p.quantity <= 0 ? "text-gray-300 cursor-not-allowed" : "text-black hover:text-emerald-600 hover:bg-emerald-50"}`}
+                      title={p.quantity <= 0 ? "Out of Stock" : "Sell Item"}
                     >
                       <ShoppingCart size={16} />
                     </button>
@@ -710,9 +717,9 @@ function DashboardView({
                       </td>
                       <td className="px-6 py-3 text-right">
                         <button
-                          onClick={() => handleDeleteSale(s.id)}
+                          onClick={() => setRemovingSale(s)}
                           className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-md hover:bg-red-50"
-                          title="Delete Sale"
+                          title="Remove Sale"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -742,6 +749,14 @@ function DashboardView({
           onClose={() => setEditingProduct(null)}
           fetchProducts={fetchProducts}
           showNotification={showNotification}
+        />
+      )}
+
+      {removingSale && (
+        <RemoveSaleModal
+          sale={removingSale}
+          onClose={() => setRemovingSale(null)}
+          onConfirm={(qty) => handleDeleteSale(removingSale.id, qty)}
         />
       )}
     </div>
@@ -1739,6 +1754,78 @@ function SellProductModal({ product, onClose, onConfirm }) {
             <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 font-bold rounded-xl transition-all shadow-sm">Cancel</button>
             <button type="submit" disabled={qty <= 0 || qty > product.quantity} className="flex-1 py-3.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-md shadow-brand-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
               Confirm Sale
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function RemoveSaleModal({ sale, onClose, onConfirm }) {
+  const [qty, setQty] = useState(sale.quantity || 1);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, []);
+
+  const handleConfirm = (e) => {
+    e.preventDefault();
+    if (qty > 0 && qty <= (sale.quantity || 1)) {
+      onConfirm(qty);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
+        <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-red-50">
+          <h2 className="text-lg font-bold text-red-800">Remove Sale</h2>
+          <button onClick={onClose} className="text-red-400 hover:text-red-600 transition-colors">✕</button>
+        </div>
+        <form onSubmit={handleConfirm} className="p-6 flex flex-col items-center shadow-inner bg-slate-50/50">
+          <div className="mb-4 text-center">
+            <h3 className="text-xl font-extrabold text-gray-900 leading-tight">{sale.name}</h3>
+            <p className="text-sm text-gray-500 mt-1 font-medium">Quantity sold: <span className="font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">{sale.quantity || 1}</span></p>
+          </div>
+          
+          <label className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">Quantity to Remove</label>
+          <div className="flex items-center gap-6 mb-8 bg-white px-6 py-4 rounded-2xl shadow-sm border border-gray-100">
+            <button
+              type="button"
+              onClick={() => setQty(q => Math.max(1, q - 1))}
+              className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition-all active:scale-95"
+            >
+              <MinusCircle size={32} strokeWidth={2} />
+            </button>
+            
+            <input
+              ref={inputRef}
+              type="number"
+              min="1"
+              max={sale.quantity || 1}
+              value={qty}
+              onChange={(e) => setQty(parseInt(e.target.value) || 1)}
+              className="w-20 text-center text-4xl font-black border-b-2 border-transparent focus:border-red-500 outline-none bg-transparent text-gray-800 selection:bg-red-200"
+            />
+            
+            <button
+              type="button"
+              onClick={() => setQty(q => Math.min(sale.quantity || 1, q + 1))}
+              className="text-gray-400 hover:text-emerald-500 hover:bg-emerald-50 p-2 rounded-full transition-all active:scale-95"
+            >
+              <PlusCircle size={32} strokeWidth={2} />
+            </button>
+          </div>
+
+          <div className="w-full flex gap-3">
+            <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 font-bold rounded-xl transition-all shadow-sm">Cancel</button>
+            <button type="submit" disabled={qty <= 0 || qty > (sale.quantity || 1)} className="flex-1 py-3.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-md shadow-red-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
+              Confirm Remove
             </button>
           </div>
         </form>
