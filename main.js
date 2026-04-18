@@ -360,18 +360,40 @@ ipcMain.handle("get-recent-sales", () => {
   return { success: true, data: stmt.all() };
 });
 
-ipcMain.handle("delete-sale", (event, saleId) => {
+ipcMain.handle("delete-sale", (event, saleId, qtyToRemove) => {
   try {
     const sale = db.prepare("SELECT * FROM sales WHERE id = ?").get(saleId);
     if (!sale) return { success: false, message: "Sale not found" };
 
-    db.prepare("UPDATE products SET quantity = quantity + ? WHERE id = ?").run(
-      sale.quantity || 1,
-      sale.product_id,
-    );
-    db.prepare("DELETE FROM sales WHERE id = ?").run(saleId);
+    const currentQty = sale.quantity || 1;
+    const removeQty = qtyToRemove ? parseInt(qtyToRemove) : currentQty;
 
-    return { success: true, message: "Sale deleted and stock restored" };
+    if (removeQty >= currentQty) {
+      db.prepare("UPDATE products SET quantity = quantity + ? WHERE id = ?").run(
+        currentQty,
+        sale.product_id,
+      );
+      db.prepare("DELETE FROM sales WHERE id = ?").run(saleId);
+      return { success: true, message: "Sale deleted and stock restored" };
+    } else {
+      const itemSellPrice = sale.sell_price / currentQty;
+      const itemBuyPrice = sale.buy_price / currentQty;
+      const itemProfit = sale.profit / currentQty;
+
+      db.prepare("UPDATE products SET quantity = quantity + ? WHERE id = ?").run(
+        removeQty,
+        sale.product_id,
+      );
+      
+      db.prepare("UPDATE sales SET quantity = quantity - ?, sell_price = sell_price - ?, buy_price = buy_price - ?, profit = profit - ? WHERE id = ?").run(
+        removeQty,
+        itemSellPrice * removeQty,
+        itemBuyPrice * removeQty,
+        itemProfit * removeQty,
+        saleId
+      );
+      return { success: true, message: `Removed ${removeQty} items from sale` };
+    }
   } catch (error) {
     return { success: false, message: error.message };
   }

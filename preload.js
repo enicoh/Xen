@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('api', {
   getSalesStats: () => ipcRenderer.invoke('get-sales-stats'),
   exportSalesExcel: () => ipcRenderer.invoke('export-sales-excel'),
   getRecentSales: () => ipcRenderer.invoke('get-recent-sales'),
-  deleteSale: (id) => ipcRenderer.invoke('delete-sale', id),
+  deleteSale: (id, qty) => ipcRenderer.invoke('delete-sale', id, qty),
   resetDatabase: () => ipcRenderer.invoke('reset-database'),
   exportStockExcel: () => ipcRenderer.invoke('export-stock-excel'),
   addSeller: (username, password) => ipcRenderer.invoke('add-seller', username, password),
