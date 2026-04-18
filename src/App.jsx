@@ -1376,7 +1376,8 @@ function SettingsView({ showNotification, fetchProducts, currentUser, setCurrent
   };
 
   const handleDeleteSeller = async (id) => {
-    if (window.confirm("Are you sure you want to delete this seller?")) {
+    const isConfirmed = await window.api.confirm("Are you sure you want to delete this seller?");
+    if (isConfirmed) {
       if (window.api && window.api.deleteSeller) {
         const res = await window.api.deleteSeller(id);
         if (res.success) {
@@ -1395,11 +1396,10 @@ function SettingsView({ showNotification, fetchProducts, currentUser, setCurrent
       return;
     }
 
-    if (
-      window.confirm(
-        "FINAL WARNING: This will permanently delete ALL products and ALL sales history. Are you absolutely sure?",
-      )
-    ) {
+    const isConfirmed = await window.api.confirm(
+      "FINAL WARNING: This will permanently delete ALL products and ALL sales history. Are you absolutely sure?",
+    );
+    if (isConfirmed) {
       setIsResetting(true);
       if (window.api && window.api.resetDatabase) {
         const res = await window.api.resetDatabase();

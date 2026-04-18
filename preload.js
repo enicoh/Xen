@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('api', {
   getSellers: () => ipcRenderer.invoke('get-sellers'),
   deleteSeller: (id) => ipcRenderer.invoke('delete-seller', id),
   updateUser: (id, newUsername, newPassword) => ipcRenderer.invoke('update-user', id, newUsername, newPassword),
+  confirm: (message) => ipcRenderer.invoke('confirm', message),
 });

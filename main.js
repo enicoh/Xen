@@ -478,3 +478,16 @@ ipcMain.handle("update-user", (event, id, newUsername, newPassword) => {
     return { success: false, message: error.message };
   }
 });
+
+ipcMain.handle("confirm", async (event, message) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showMessageBox(win, {
+    type: "warning",
+    buttons: ["Cancel", "Yes, I'm sure"],
+    defaultId: 1,
+    cancelId: 0,
+    title: "Confirm Action",
+    message: message
+  });
+  return result.response === 1;
+});
